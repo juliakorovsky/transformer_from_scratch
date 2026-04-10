@@ -76,8 +76,8 @@ class EncoderLayer(torch.nn.Module): # was TransformerLayer
 class DecoderLayer(torch.nn.Module):
     def __init__(self, d_model, n_head, dropout=0.1):
         super().__init__()
-        self.multihead_self_attention_enc = MultiHeadSelfAttention(d_model, n_head, dropout)
-        self.multihead_self_attention = MultiHeadSelfAttention(d_model, n_head, dropout)
+        self.multihead_self_attention_enc = MultiHeadSelfAttention(d_model, n_head)
+        self.multihead_self_attention = MultiHeadSelfAttention(d_model, n_head)
 
         self.feed_forward = torch.nn.Sequential(
             torch.nn.Linear(d_model, d_model * 4),
