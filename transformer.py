@@ -29,7 +29,7 @@ class ScaledDotProductAttention(torch.nn.Module):
 
 
 class MultiHeadSelfAttention(torch.nn.Module):
-    def __init__(self, d_model, n_head, dropout=0.1):
+    def __init__(self, d_model, n_head):
         super().__init__()
         self.n_heads = n_head # 8 (from the paper)
         self.d_model = d_model
@@ -57,7 +57,7 @@ class MultiHeadSelfAttention(torch.nn.Module):
 class EncoderLayer(torch.nn.Module): # was TransformerLayer
     def __init__(self, d_model, n_head, dropout=0.1):
         super().__init__()
-        self.multihead_self_attention = MultiHeadSelfAttention(d_model, n_head, dropout)
+        self.multihead_self_attention = MultiHeadSelfAttention(d_model, n_head)
         self.feed_forward = torch.nn.Sequential(
             torch.nn.Linear(d_model, d_model * 4),
             torch.nn.ReLU(),
