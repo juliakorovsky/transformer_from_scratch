@@ -12,7 +12,7 @@ def get_positional_embeddings(seq_len, d_model):
     return emb
 
 
-class Scaled_Dot_Product_Attention(torch.nn.Module):
+class ScaledDotProductAttention(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
@@ -29,14 +29,14 @@ class Scaled_Dot_Product_Attention(torch.nn.Module):
 
 
 class MultiHeadSelfAttention(torch.nn.Module):
-    def __init__(self, d_model, n_head):
+    def __init__(self, d_model, n_head, dropout=0.1):
         super().__init__()
         self.n_heads = n_head # 8 (from the paper)
         self.d_model = d_model
         self.k_linear = torch.nn.Linear(d_model, d_model)
         self.q_linear = torch.nn.Linear(d_model, d_model)
         self.v_linear = torch.nn.Linear(d_model, d_model)
-        self.scaled = Scaled_Dot_Product_Attention()
+        self.scaled = ScaledDotProductAttention()
         self.final_linear = torch.nn.Linear(d_model, d_model)
 
     def forward(self, q, k, v, mask=None):
@@ -55,28 +55,29 @@ class MultiHeadSelfAttention(torch.nn.Module):
         return result
 
 class EncoderLayer(torch.nn.Module): # was TransformerLayer
-    def __init__(self, d_model, n_head):
+    def __init__(self, d_model, n_head, dropout=0.1):
         super().__init__()
-        self.multihead_self_attention = MultiHeadSelfAttention(d_model, n_head)
+        self.multihead_self_attention = MultiHeadSelfAttention(d_model, n_head, dropout)
         self.feed_forward = torch.nn.Sequential(
             torch.nn.Linear(d_model, d_model * 4),
             torch.nn.ReLU(),
             torch.nn.Linear(d_model * 4, d_model))
         self.layer_norm_attention = torch.nn.LayerNorm(d_model)
         self.layer_norm_feed = torch.nn.LayerNorm(d_model)
+        self.dropout = torch.nn.Dropout(dropout)
 
     def forward(self, x):
-        x = self.layer_norm_attention(x + self.multihead_self_attention(x, x, x))
-        x = self.layer_norm_feed(x + self.feed_forward(x))
+        x = self.layer_norm_attention(x + self.dropout(self.multihead_self_attention(x, x, x)))
+        x = self.layer_norm_feed(x + self.dropout(self.feed_forward(x)))
         return x
 
 
 
 class DecoderLayer(torch.nn.Module):
-    def __init__(self, d_model, n_head):
+    def __init__(self, d_model, n_head, dropout=0.1):
         super().__init__()
-        self.multihead_self_attention_enc = MultiHeadSelfAttention(d_model, n_head)
-        self.multihead_self_attention = MultiHeadSelfAttention(d_model, n_head)
+        self.multihead_self_attention_enc = MultiHeadSelfAttention(d_model, n_head, dropout)
+        self.multihead_self_attention = MultiHeadSelfAttention(d_model, n_head, dropout)
 
         self.feed_forward = torch.nn.Sequential(
             torch.nn.Linear(d_model, d_model * 4),
@@ -85,53 +86,55 @@ class DecoderLayer(torch.nn.Module):
         self.layer_norm_attention_enc = torch.nn.LayerNorm(d_model)
         self.layer_norm_attention = torch.nn.LayerNorm(d_model)
         self.layer_norm_feed = torch.nn.LayerNorm(d_model)
+        self.dropout = torch.nn.Dropout(dropout)
         # output dimension should be 512
         # always separate LayerNorm for different layers
 
     def forward(self, x, enc_out, mask):
-        x = self.layer_norm_attention_enc(x + self.multihead_self_attention_enc(x, x, x, mask=mask))
-        x = self.layer_norm_attention(x + self.multihead_self_attention(x, enc_out, enc_out))
-        x = self.layer_norm_feed(x + self.feed_forward(x))
+        x = self.layer_norm_attention_enc(x + self.dropout(self.multihead_self_attention_enc(x, x, x, mask=mask)))
+        x = self.layer_norm_attention(x + self.dropout(self.multihead_self_attention(x, enc_out, enc_out)))
+        x = self.layer_norm_feed(x + self.dropout(self.feed_forward(x)))
         return x
 
 
 
 class TransformerEncoder(torch.nn.Module):
-    def __init__(self, input_dim, d_model, n_head, n_layers):
+    def __init__(self, input_dim, d_model, n_head, n_layers, dropout=0.1):
         super().__init__()
         self.input_dim = input_dim
         self.d_model = d_model
         self.n_head = n_head
         self.n_layers = n_layers
         self.input_projection = torch.nn.Linear(self.input_dim, self.d_model)
-        self.transformer_layers = torch.nn.ModuleList([EncoderLayer(self.d_model, self.n_head) for i in range(self.n_layers)])
+        self.transformer_layers = torch.nn.ModuleList([EncoderLayer(self.d_model, self.n_head, dropout) for i in range(self.n_layers)])
+        self.dropout = torch.nn.Dropout(dropout)
 
     def forward(self, x):
         x = self.input_projection(x)
         pos = get_positional_embeddings(x.shape[1], self.d_model).to(x.device)
-        x = x + pos
+        x = self.dropout(x + pos)
         for i in range(len(self.transformer_layers)):
             x = self.transformer_layers[i](x)
         return x
 
 
 class TransformerDecoder(torch.nn.Module):
-    def __init__(self, input_dim, d_model, n_head, n_layers):
+    def __init__(self, input_dim, d_model, n_head, n_layers, dropout=0.1):
         super().__init__()
         self.input_dim = input_dim
         self.d_model = d_model
         self.n_head = n_head
         self.n_layers = n_layers
         self.input_projection = torch.nn.Linear(self.input_dim, self.d_model)
-        self.transformer_layers = torch.nn.ModuleList([DecoderLayer(self.d_model, self.n_head) for i in range(self.n_layers)])
+        self.transformer_layers = torch.nn.ModuleList([DecoderLayer(self.d_model, self.n_head, dropout) for i in range(self.n_layers)])
         self.final_layer = torch.nn.Linear(self.d_model, input_dim) # to spectrogram dim
+        self.dropout = torch.nn.Dropout(dropout)
 
     def forward(self, targets, enc_out):
         targets = self.input_projection(targets)
         seq_len = targets.shape[1]
         pos = get_positional_embeddings(targets.shape[1], self.d_model).to(targets.device)
-        targets = targets + pos
-        x = targets
+        x = self.dropout(targets + pos)
         mask = torch.tril(torch.ones(seq_len, seq_len)).to(targets.device)
         for i in range(len(self.transformer_layers)):
             x = self.transformer_layers[i](x, enc_out, mask=mask)
@@ -141,14 +144,14 @@ class TransformerDecoder(torch.nn.Module):
 
 
 class Transformer(torch.nn.Module):
-    def __init__(self, input_dim, d_model, n_head, n_layers):
+    def __init__(self, input_dim, d_model, n_head, n_layers, dropout=0.1):
         super().__init__()
         self.input_dim = input_dim
         self.d_model = d_model
         self.n_head = n_head
         self.n_layers = n_layers
-        self.encoder = TransformerEncoder(self.input_dim, self.d_model, self.n_head, self.n_layers)
-        self.decoder = TransformerDecoder(self.input_dim, self.d_model, self.n_head, self.n_layers)
+        self.encoder = TransformerEncoder(self.input_dim, self.d_model, self.n_head, self.n_layers, dropout)
+        self.decoder = TransformerDecoder(self.input_dim, self.d_model, self.n_head, self.n_layers, dropout)
 
     def forward(self, x, targets):
         enc_out = self.encoder(x)
